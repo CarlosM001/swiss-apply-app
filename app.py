@@ -220,7 +220,7 @@ else:
                 except Exception as e:
                     st.error(f"Fehler beim Ändern: {e}")
 
-    # --- LIVE JOB-BOARD (API) ---
+   # --- LIVE JOB-BOARD (API) ---
     st.divider()
     st.header("🎯 Live Job-Börse")
     st.write("Finde aktuelle Stelleninserate direkt hier in der App.")
@@ -229,12 +229,13 @@ else:
     api_job = cj1.text_input("Welchen Job suchst du?", placeholder="z.B. Projektleiter", key="api_job")
     api_city = cj2.text_input("Wo?", value=current_city if current_city else "Schweiz", key="api_city")
     
-    # ⚠️ HIER KOMMT DEIN ECHTER SCHLÜSSEL REIN:
+    # Dein Key ist hier korrekt hinterlegt
     JOOBLE_API_KEY = "19414f40-206a-4cf6-ac1b-0106e96f7f8d"
     
     if st.button("Jobs live laden"):
-        if JOOBLE_API_KEY == "19414f40-206a-4cf6-ac1b-0106e96f7f8d":
-            st.warning("⚠️ Du musst erst deinen kostenlosen Jooble-API-Schlüssel im Code eintragen!")
+        # Hier prüfen wir jetzt nur noch, ob der Platzhalter-Text weg ist
+        if JOOBLE_API_KEY == "" or "DEIN_JOOBLE_KEY" in JOOBLE_API_KEY:
+            st.warning("⚠️ Bitte trage deinen Jooble-API-Schlüssel im Code ein!")
         else:
             with st.spinner("Verbinde mit Job-Servern..."):
                 try:
@@ -258,7 +259,7 @@ else:
                                     st.link_button("Komplettes Inserat ansehen", job.get("link", "#"))
                                     st.divider()
                     else:
-                        st.error(f"Fehler vom Server. Code: {response.status_code}")
+                        st.error(f"Fehler vom Server. Code: {response.status_code}. (Hinweis: Prüfe, ob dein Jooble-Key bereits per E-Mail bestätigt wurde.)")
                 except Exception as e:
                     st.error(f"Technischer Fehler beim Abruf: {e}")
 

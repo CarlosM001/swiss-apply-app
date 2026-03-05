@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import sys
 import re
+import requests
 from io import BytesIO 
 from docx import Document 
 from dotenv import load_dotenv
@@ -36,7 +37,7 @@ footer {visibility: hidden !important;}
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# Verbindung zu Supabase Zürich (Nutzt den öffentlichen ANON KEY!)
+# Verbindung zu Supabase Zürich
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase = create_client(supabase_url, supabase_key)
@@ -59,7 +60,6 @@ if 'access_token' in st.session_state and 'refresh_token' in st.session_state:
 # ==========================================
 if "code" in st.query_params:
     try:
-        # Code gegen einen Login tauschen
         res = supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
         st.session_state.user = res.user
         st.session_state.access_token = res.session.access_token
@@ -163,18 +163,24 @@ else:
     except Exception:
         p_data = {}
 
+    current_name = p_data.get("full_name", "")
+    current_street = p_data.get("street", "")
+    current_city = p_data.get("city", "")
+    current_phone = p_data.get("phone", "")
+    current_resume = p_data.get("resume_text", "")
+
     # --- PROFIL & LEBENSLAUF UPLOAD ---
     with st.expander("👤 Mein Profil & Lebenslauf"):
         with st.form("p_form"):
             st.subheader("1. Kontaktdaten")
             c1, c2 = st.columns(2)
-            f_name = c1.text_input("Vollständiger Name", value=p_data.get("full_name", ""))
-            f_street = c1.text_input("Strasse & Nr.", value=p_data.get("street", ""))
-            f_city = c2.text_input("PLZ & Ort", value=p_data.get("city", ""))
-            f_phone = c2.text_input("Telefon", value=p_data.get("phone", ""))
+            f_name = c1.text_input("Vollständiger Name", value=current_name)
+            f_street = c1.text_input("Strasse & Nr.", value=current_street)
+            f_city = c2.text_input("PLZ & Ort", value=current_city)
+            f_phone = c2.text_input("Telefon", value=current_phone)
             
             st.subheader("2. Lebenslauf (Für die KI)")
-            if p_data.get("resume_text"):
+            if current_resume:
                 st.success("✅ Ein Lebenslauf ist bereits gespeichert! (Du kannst ihn überschreiben, indem du einen neuen hochlädst)")
             
             uploaded_pdf = st.file_uploader("Lebenslauf hochladen (Nur PDF)", type=["pdf"])
@@ -189,7 +195,6 @@ else:
                         "phone": f_phone
                     }
                     
-                    # Wenn ein PDF hochgeladen wurde, Text extrahieren
                     if uploaded_pdf is not None:
                         reader = PdfReader(uploaded_pdf)
                         extracted_text = ""
@@ -198,7 +203,6 @@ else:
                         update_data["resume_text"] = extracted_text
                         st.info("PDF erfolgreich gelesen und Text extrahiert!")
 
-                    # Alles in Supabase speichern
                     supabase.table("profiles").upsert(update_data).execute()
                     st.success("Profil erfolgreich aktualisiert!")
                     st.rerun()
@@ -216,12 +220,56 @@ else:
                 except Exception as e:
                     st.error(f"Fehler beim Ändern: {e}")
 
+    # --- LIVE JOB-BOARD (API) ---
+    st.divider()
+    st.header("🎯 Live Job-Börse")
+    st.write("Finde aktuelle Stelleninserate direkt hier in der App.")
+    
+    cj1, cj2 = st.columns(2)
+    api_job = cj1.text_input("Welchen Job suchst du?", placeholder="z.B. Projektleiter", key="api_job")
+    api_city = cj2.text_input("Wo?", value=current_city if current_city else "Schweiz", key="api_city")
+    
+    # ⚠️ HIER KOMMT DEIN ECHTER SCHLÜSSEL REIN:
+    JOOBLE_API_KEY = "DEIN_JOOBLE_KEY_HIER"
+    
+    if st.button("Jobs live laden"):
+        if JOOBLE_API_KEY == "19414f40-206a-4cf6-ac1b-0106e96f7f8d":
+            st.warning("⚠️ Du musst erst deinen kostenlosen Jooble-API-Schlüssel im Code eintragen!")
+        else:
+            with st.spinner("Verbinde mit Job-Servern..."):
+                try:
+                    url = f"https://ch.jooble.org/api/{JOOBLE_API_KEY}"
+                    payload = {"keywords": api_job, "location": api_city}
+                    headers = {"Content-type": "application/json"}
+                    response = requests.post(url, json=payload, headers=headers)
+                    
+                    if response.status_code == 200:
+                        jobs = response.json().get("jobs", [])
+                        if not jobs:
+                            st.info("Für diese Suchanfrage wurden leider keine Jobs gefunden.")
+                        else:
+                            st.success(f"✅ {len(jobs)} brandneue Stellen gefunden!")
+                            for job in jobs[:5]:
+                                with st.container():
+                                    st.subheader(job.get("title", "Kein Titel"))
+                                    st.write(f"🏢 **{job.get('company', 'Firma unbekannt')}** | 📍 {job.get('location', '')}")
+                                    snippet = job.get("snippet", "").replace("<b>", "**").replace("</b>", "**")
+                                    st.write(f"> {snippet}")
+                                    st.link_button("Komplettes Inserat ansehen", job.get("link", "#"))
+                                    st.divider()
+                    else:
+                        st.error(f"Fehler vom Server. Code: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Technischer Fehler beim Abruf: {e}")
+
     # --- GENERATOR ---
+    st.divider()
     st.header("🚀 Neuer Bewerbungs-Brief")
+    st.write("Kopiere die Daten deines Wunsch-Jobs hier hinein.")
     col_a, col_b = st.columns(2)
     company = col_a.text_input("Firma", placeholder="z.B. Swisscom")
     job_title = col_b.text_input("Stelle", placeholder="z.B. Projektleiter")
-    job_desc = st.text_area("Stellenbeschreibung", height=150)
+    job_desc = st.text_area("Stellenbeschreibung (Kopiere den Text aus dem Inserat)", height=150)
 
     if st.button("Brief generieren & loggen"):
         if not company or not job_title:
@@ -230,35 +278,30 @@ else:
             with st.spinner("KI arbeitet..."):
                 try:
                     header = SwissLetterHeader(
-                        full_name=f_name if f_name else "Name fehlt",
-                        street=f_street if f_street else "Strasse fehlt",
-                        postal_code="", city=f_city if f_city else "Ort fehlt",
+                        full_name=current_name if current_name else "Name fehlt",
+                        street=current_street if current_street else "Strasse fehlt",
+                        postal_code="", city=current_city if current_city else "Ort fehlt",
                         email=st.session_state.user.email
                     )
                     
-                    # 1. Den Basis-Befehl für die KI bauen
                     prompt = build_single_call_prompt(
-                        {"personal": {"full_name": f_name}}, 
+                        {"personal": {"full_name": current_name}}, 
                         {"title": job_title, "company": company, "location": "CH", "requirements": {"keywords": [job_desc[:50]]}}
                     )
                     
-                    # --- NEU: LEBENSLAUF AN DIE KI ÜBERGEBEN ---
-                    resume_text = p_data.get("resume_text", "")
-                    if resume_text:
-                        prompt += f"\n\nWICHTIGE ZUSATZINFO: Hier ist der Lebenslauf des Bewerbers. Bitte beziehe unbedingt echte Erfahrungen, Arbeitgeber und Fähigkeiten aus diesem Lebenslauf in das Anschreiben ein, sofern sie zur Stelle passen. Erfinde keine Erfahrungen, die nicht im Lebenslauf stehen!\n\nLEBENSLAUF:\n{resume_text}"
-                    # -------------------------------------------
-
-                    # 2. KI mit dem erweiterten Wissen starten
+                    if current_resume:
+                        prompt += f"\n\nWICHTIGE ZUSATZINFO: Hier ist der Lebenslauf des Bewerbers. Bitte beziehe unbedingt echte Erfahrungen, Arbeitgeber und Fähigkeiten aus diesem Lebenslauf in das Anschreiben ein, sofern sie zur Stelle passen. Erfinde keine Erfahrungen, die nicht im Lebenslauf stehen!\n\nLEBENSLAUF:\n{current_resume}"
+                    
                     llm_result = generate_cover_letter_body_only(prompt=prompt)
                     
                     docx_bytes = build_cover_letter_docx(
                         header=header, recipient_block=f"{company}\nPersonalabteilung",
-                        place_and_date=f"{f_city or 'Schweiz'}, 05.03.2026",
+                        place_and_date=f"{current_city or 'Schweiz'}, 05.03.2026",
                         subject=f"Bewerbung als {job_title}",
-                        body_text=llm_result.body_text, signature_name=f_name
+                        body_text=llm_result.body_text, signature_name=current_name
                     )
                     
-                    # Cloud Upload (Persönlicher Ordner)
+                    # Cloud Upload
                     clean_name = re.sub(r'[^a-zA-Z0-9]', '_', company)
                     path = f"web_generiert/{st.session_state.user.id}/{clean_name}.docx"
                     supabase.storage.from_("letters").upload(path=path, file=docx_bytes, file_options={"upsert": "true"})
@@ -269,7 +312,7 @@ else:
                         "job_title": job_title, "status": "generated", "channel": "Online"
                     }).execute()
                     
-                    st.success("Brief in deinem Zürcher Archiv gespeichert!")
+                    st.success("Brief generiert und sicher archiviert!")
                     st.download_button("📂 Download Word", data=docx_bytes, file_name=f"Bewerbung_{clean_name}.docx")
                 except Exception as e:
                     st.error(f"Fehler bei der Generierung oder Speicherung: {e}")
@@ -278,7 +321,6 @@ else:
     st.divider()
     st.header("📊 Dein RAV-Dashboard & Historie")
     
-    # 1. RAV Metriken
     try:
         apps_res = supabase.table("applications").select("*").eq("user_id", st.session_state.user.id).order("applied_at", desc=True).execute()
         apps = apps_res.data if apps_res.data else []
@@ -294,7 +336,6 @@ else:
     except Exception as e:
         st.warning(f"RAV-Daten konnten nicht geladen werden: {e}")
 
-    # 2. Dateihistorie
     st.subheader("📂 Deine Dokumenten-Ablage")
     try:
         user_id_path = f"web_generiert/{st.session_state.user.id}/"

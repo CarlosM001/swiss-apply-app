@@ -4,3 +4,4 @@ python-docx
 python-dotenv
 litellm
 pypdf
+requests

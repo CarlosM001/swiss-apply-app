@@ -1,10 +1,16 @@
 import streamlit as st
 import os
+import sys
 import re
 from io import BytesIO 
 from docx import Document 
 from dotenv import load_dotenv
 from supabase import create_client
+from pypdf import PdfReader
+
+# Dem Server den Weg zum 'backend' Ordner zeigen
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from backend.shared.utils.docx_builder import build_cover_letter_docx, SwissLetterHeader
 from backend.api.llm.prompt_builder import build_single_call_prompt
 from backend.api.llm.llm_client import generate_cover_letter_body_only
@@ -15,7 +21,22 @@ from backend.api.llm.llm_client import generate_cover_letter_body_only
 load_dotenv()
 st.set_page_config(page_title="Swiss-Apply KI", page_icon="🇨🇭", layout="wide")
 
-# Verbindung zu Supabase Zürich (WICHTIG: Nutzt den öffentlichen ANON KEY!)
+# ==========================================
+# 1.5 STARTUP-DESIGN (CSS-Tricks)
+# ==========================================
+hide_st_style = """
+<style>
+/* Versteckt den Deploy-Button und das Menü oben rechts */
+[data-testid="stToolbar"] {visibility: hidden !important;}
+/* Versteckt den Streamlit-Footer ganz unten */
+footer {visibility: hidden !important;}
+/* Macht den weissen Abstand ganz oben etwas schmaler */
+.block-container {padding-top: 2rem;}
+</style>
+"""
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
+# Verbindung zu Supabase Zürich (Nutzt den öffentlichen ANON KEY!)
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase = create_client(supabase_url, supabase_key)
@@ -26,18 +47,16 @@ supabase = create_client(supabase_url, supabase_key)
 if 'user' not in st.session_state:
     st.session_state.user = None
 
-# Supabase den Login-Token bei jedem Klick wieder übergeben, damit RLS funktioniert
+# Supabase den Login-Token bei jedem Klick wieder übergeben
 if 'access_token' in st.session_state and 'refresh_token' in st.session_state:
     try:
         supabase.auth.set_session(st.session_state.access_token, st.session_state.refresh_token)
     except Exception:
         pass
 
-
 # ==========================================
 # 2.5 PASSWORT-RESET ABFANGEN
 # ==========================================
-# Prüft, ob ein geheimer Code in der URL steht (vom E-Mail-Link)
 if "code" in st.query_params:
     try:
         # Code gegen einen Login tauschen
@@ -45,7 +64,6 @@ if "code" in st.query_params:
         st.session_state.user = res.user
         st.session_state.access_token = res.session.access_token
         st.session_state.refresh_token = res.session.refresh_token
-        # Code aus der URL löschen, damit es sauber aussieht
         st.query_params.clear()
         st.success("✅ Verifizierung erfolgreich! Bitte setze jetzt unten ein neues Passwort.")
     except Exception:
@@ -91,7 +109,6 @@ if st.session_state.user is None:
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email_in, "password": pass_in})
                     st.session_state.user = res.user
-                    # TOKEN SPEICHERN, damit die App nicht vergesslich ist!
                     st.session_state.access_token = res.session.access_token
                     st.session_state.refresh_token = res.session.refresh_token
                     st.rerun()
@@ -102,15 +119,11 @@ if st.session_state.user is None:
         with st.form("reg_form"):
             new_email = st.text_input("Deine E-Mail")
             new_pass = st.text_input("Passwort (min. 6 Zeichen)", type="password")
-            
-            # --- NEU: DIE VIP-SCHRANKE ---
             invite_code = st.text_input("Geheimer Einladungscode", type="password", help="Frag Carlos nach dem Code!")
             
             if st.form_submit_button("Konto erstellen", use_container_width=True):
-                # 1. Prüfen, ob der Code stimmt
-                if invite_code != "SWISS2026":  # <-- HIER DEIN EIGENES PASSWORT EINTRAGEN
+                if invite_code != "SWISS2026":
                     st.error("❌ Falscher Einladungscode! Registrierung blockiert.")
-                # 2. Wenn der Code stimmt, erst dann bei Supabase registrieren
                 elif len(new_pass) < 6:
                     st.error("Das Passwort muss mindestens 6 Zeichen lang sein.")
                 else:
@@ -139,46 +152,65 @@ else:
     if st.sidebar.button("Logout"):
         supabase.auth.sign_out()
         st.session_state.user = None
-        # Tokens beim Logout sauber löschen
         st.session_state.pop('access_token', None)
         st.session_state.pop('refresh_token', None)
         st.rerun()
 
-    # --- PROFIL-DATEN SICHER LADEN (Verhindert Absturz bei leeren Profilen) ---
+    # --- PROFIL-DATEN SICHER LADEN ---
     try:
         profile_res = supabase.table("profiles").select("*").eq("id", st.session_state.user.id).single().execute()
         p_data = profile_res.data if profile_res.data else {}
     except Exception:
         p_data = {}
 
-    with st.expander("👤 Mein Absender-Profil bearbeiten"):
+    # --- PROFIL & LEBENSLAUF UPLOAD ---
+    with st.expander("👤 Mein Profil & Lebenslauf"):
         with st.form("p_form"):
+            st.subheader("1. Kontaktdaten")
             c1, c2 = st.columns(2)
             f_name = c1.text_input("Vollständiger Name", value=p_data.get("full_name", ""))
             f_street = c1.text_input("Strasse & Nr.", value=p_data.get("street", ""))
             f_city = c2.text_input("PLZ & Ort", value=p_data.get("city", ""))
             f_phone = c2.text_input("Telefon", value=p_data.get("phone", ""))
-            if st.form_submit_button("Profil speichern"):
+            
+            st.subheader("2. Lebenslauf (Für die KI)")
+            if p_data.get("resume_text"):
+                st.success("✅ Ein Lebenslauf ist bereits gespeichert! (Du kannst ihn überschreiben, indem du einen neuen hochlädst)")
+            
+            uploaded_pdf = st.file_uploader("Lebenslauf hochladen (Nur PDF)", type=["pdf"])
+            
+            if st.form_submit_button("Profil & Lebenslauf speichern"):
                 try:
-                    # Upsert (Aktualisieren oder neu anlegen)
-                    supabase.table("profiles").upsert({
+                    update_data = {
                         "id": st.session_state.user.id, 
                         "full_name": f_name, 
                         "street": f_street, 
                         "city": f_city, 
                         "phone": f_phone
-                    }).execute()
-                    st.success("Profil aktualisiert!")
+                    }
+                    
+                    # Wenn ein PDF hochgeladen wurde, Text extrahieren
+                    if uploaded_pdf is not None:
+                        reader = PdfReader(uploaded_pdf)
+                        extracted_text = ""
+                        for page in reader.pages:
+                            extracted_text += page.extract_text() + "\n"
+                        update_data["resume_text"] = extracted_text
+                        st.info("PDF erfolgreich gelesen und Text extrahiert!")
+
+                    # Alles in Supabase speichern
+                    supabase.table("profiles").upsert(update_data).execute()
+                    st.success("Profil erfolgreich aktualisiert!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Fehler beim Speichern: {e}")
+
     # --- PASSWORT ÄNDERN ---
     with st.expander("🔑 Mein Passwort ändern"):
         with st.form("pwd_reset_form"):
             new_pwd = st.text_input("Neues Passwort (min. 6 Zeichen)", type="password")
             if st.form_submit_button("Passwort aktualisieren"):
                 try:
-                    # Update-Befehl an Supabase senden
                     supabase.auth.update_user({"password": new_pwd})
                     st.success("Passwort erfolgreich geändert! Du kannst dich ab sofort damit einloggen.")
                 except Exception as e:
@@ -204,7 +236,19 @@ else:
                         email=st.session_state.user.email
                     )
                     
-                    prompt = build_single_call_prompt({"personal": {"full_name": f_name}}, {"title": job_title, "company": company, "location": "CH", "requirements": {"keywords": [job_desc[:50]]}})
+                    # 1. Den Basis-Befehl für die KI bauen
+                    prompt = build_single_call_prompt(
+                        {"personal": {"full_name": f_name}}, 
+                        {"title": job_title, "company": company, "location": "CH", "requirements": {"keywords": [job_desc[:50]]}}
+                    )
+                    
+                    # --- NEU: LEBENSLAUF AN DIE KI ÜBERGEBEN ---
+                    resume_text = p_data.get("resume_text", "")
+                    if resume_text:
+                        prompt += f"\n\nWICHTIGE ZUSATZINFO: Hier ist der Lebenslauf des Bewerbers. Bitte beziehe unbedingt echte Erfahrungen, Arbeitgeber und Fähigkeiten aus diesem Lebenslauf in das Anschreiben ein, sofern sie zur Stelle passen. Erfinde keine Erfahrungen, die nicht im Lebenslauf stehen!\n\nLEBENSLAUF:\n{resume_text}"
+                    # -------------------------------------------
+
+                    # 2. KI mit dem erweiterten Wissen starten
                     llm_result = generate_cover_letter_body_only(prompt=prompt)
                     
                     docx_bytes = build_cover_letter_docx(
@@ -219,7 +263,7 @@ else:
                     path = f"web_generiert/{st.session_state.user.id}/{clean_name}.docx"
                     supabase.storage.from_("letters").upload(path=path, file=docx_bytes, file_options={"upsert": "true"})
 
-                    # In DB loggen (Dank Token-Fix klappt das jetzt!)
+                    # In DB loggen
                     supabase.table("applications").insert({
                         "user_id": st.session_state.user.id, "company_name": company,
                         "job_title": job_title, "status": "generated", "channel": "Online"

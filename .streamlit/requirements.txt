@@ -1,0 +1,7 @@
+streamlit
+supabase
+python-docx
+python-dotenv
+litellm
+pypdf
+requests

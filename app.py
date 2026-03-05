@@ -1,8 +1,6 @@
 import streamlit as st
 import os
 import re
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from io import BytesIO 
 from docx import Document 
 from dotenv import load_dotenv
@@ -86,12 +84,23 @@ if st.session_state.user is None:
         with st.form("reg_form"):
             new_email = st.text_input("Deine E-Mail")
             new_pass = st.text_input("Passwort (min. 6 Zeichen)", type="password")
+            
+            # --- NEU: DIE VIP-SCHRANKE ---
+            invite_code = st.text_input("Geheimer Einladungscode", type="password", help="Frag Carlos nach dem Code!")
+            
             if st.form_submit_button("Konto erstellen", use_container_width=True):
-                try:
-                    supabase.auth.sign_up({"email": new_email, "password": new_pass})
-                    st.success("Registrierung erfolgreich! (Falls 'Confirm Email' aktiv ist, prüfe dein Postfach)")
-                except Exception as e: 
-                    st.error(f"Fehler: {e}")
+                # 1. Prüfen, ob der Code stimmt
+                if invite_code != "SWISS2026":  # <-- HIER DEIN EIGENES PASSWORT EINTRAGEN
+                    st.error("❌ Falscher Einladungscode! Registrierung blockiert.")
+                # 2. Wenn der Code stimmt, erst dann bei Supabase registrieren
+                elif len(new_pass) < 6:
+                    st.error("Das Passwort muss mindestens 6 Zeichen lang sein.")
+                else:
+                    try:
+                        supabase.auth.sign_up({"email": new_email, "password": new_pass})
+                        st.success("✅ Registrierung erfolgreich! (Falls 'Confirm Email' aktiv ist, prüfe dein Postfach)")
+                    except Exception as e: 
+                        st.error(f"Fehler: {e}")
 
     with t_pw:
         with st.form("pw_form"):
@@ -233,5 +242,4 @@ else:
         st.write("Erstelle deine erste Bewerbung, um die Ablage zu aktivieren.")
 
     with st.expander("🛡️ Datenschutz-Info"):
-
         st.write("Deine Daten liegen verschlüsselt in der Region **Zürich (eu-central-2)**.")

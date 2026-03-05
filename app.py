@@ -1,6 +1,8 @@
 import streamlit as st
 import os
 import re
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from io import BytesIO 
 from docx import Document 
 from dotenv import load_dotenv
@@ -231,4 +233,5 @@ else:
         st.write("Erstelle deine erste Bewerbung, um die Ablage zu aktivieren.")
 
     with st.expander("🛡️ Datenschutz-Info"):
+
         st.write("Deine Daten liegen verschlüsselt in der Region **Zürich (eu-central-2)**.")

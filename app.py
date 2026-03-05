@@ -33,6 +33,24 @@ if 'access_token' in st.session_state and 'refresh_token' in st.session_state:
     except Exception:
         pass
 
+
+# ==========================================
+# 2.5 PASSWORT-RESET ABFANGEN
+# ==========================================
+# Prüft, ob ein geheimer Code in der URL steht (vom E-Mail-Link)
+if "code" in st.query_params:
+    try:
+        # Code gegen einen Login tauschen
+        res = supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
+        st.session_state.user = res.user
+        st.session_state.access_token = res.session.access_token
+        st.session_state.refresh_token = res.session.refresh_token
+        # Code aus der URL löschen, damit es sauber aussieht
+        st.query_params.clear()
+        st.success("✅ Verifizierung erfolgreich! Bitte setze jetzt unten ein neues Passwort.")
+    except Exception:
+        st.error("Der Link ist ungültig oder abgelaufen.")
+
 # ==========================================
 # 3. HILFSFUNKTIONEN
 # ==========================================
@@ -154,6 +172,17 @@ else:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Fehler beim Speichern: {e}")
+    # --- PASSWORT ÄNDERN ---
+    with st.expander("🔑 Mein Passwort ändern"):
+        with st.form("pwd_reset_form"):
+            new_pwd = st.text_input("Neues Passwort (min. 6 Zeichen)", type="password")
+            if st.form_submit_button("Passwort aktualisieren"):
+                try:
+                    # Update-Befehl an Supabase senden
+                    supabase.auth.update_user({"password": new_pwd})
+                    st.success("Passwort erfolgreich geändert! Du kannst dich ab sofort damit einloggen.")
+                except Exception as e:
+                    st.error(f"Fehler beim Ändern: {e}")
 
     # --- GENERATOR ---
     st.header("🚀 Neuer Bewerbungs-Brief")

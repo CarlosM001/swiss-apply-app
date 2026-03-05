@@ -230,7 +230,7 @@ else:
     api_city = cj2.text_input("Wo?", value=current_city if current_city else "Schweiz", key="api_city")
     
     # ⚠️ HIER KOMMT DEIN ECHTER SCHLÜSSEL REIN:
-    JOOBLE_API_KEY = "DEIN_JOOBLE_KEY_HIER"
+    JOOBLE_API_KEY = "19414f40-206a-4cf6-ac1b-0106e96f7f8d"
     
     if st.button("Jobs live laden"):
         if JOOBLE_API_KEY == "19414f40-206a-4cf6-ac1b-0106e96f7f8d":
